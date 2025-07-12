@@ -69,8 +69,8 @@ class FleetAutomationAPITester:
         return success
 
     def test_server_crud(self):
-        """Test complete server CRUD operations"""
-        self.log("🚀 Testing Server CRUD Operations")
+        """Test complete server CRUD operations with enhanced features"""
+        self.log("🚀 Testing Enhanced Server CRUD Operations")
         
         # Test GET servers (empty initially)
         success, servers = self.run_test(
@@ -85,7 +85,7 @@ class FleetAutomationAPITester:
         initial_count = len(servers) if isinstance(servers, list) else 0
         self.log(f"   Initial server count: {initial_count}")
         
-        # Test CREATE server
+        # Test CREATE server with groups and tags
         test_server = {
             "name": f"test-server-{int(time.time())}",
             "hostname": "192.168.1.100",
@@ -93,12 +93,13 @@ class FleetAutomationAPITester:
             "password": "testpass",
             "port": 22,
             "os_type": "linux",
-            "groups": ["test"],
+            "groups": ["test", "production"],
+            "tags": ["web", "nginx"],
             "description": "Test server for API testing"
         }
         
         success, created_server = self.run_test(
-            "Create Server",
+            "Create Enhanced Server",
             "POST",
             "api/servers",
             200,
@@ -111,6 +112,85 @@ class FleetAutomationAPITester:
         if server_id:
             self.created_servers.append(server_id)
             self.log(f"   Created server ID: {server_id}")
+        
+        # Test MikroTik server creation
+        mikrotik_server = {
+            "name": f"mikrotik-test-{int(time.time())}",
+            "hostname": "192.168.1.101",
+            "username": "admin",
+            "password": "testpass",
+            "port": 22,
+            "os_type": "mikrotik",
+            "groups": ["network"],
+            "tags": ["router"],
+            "description": "Test MikroTik server"
+        }
+        
+        success, created_mikrotik = self.run_test(
+            "Create MikroTik Server",
+            "POST",
+            "api/servers",
+            200,
+            data=mikrotik_server
+        )
+        if success:
+            mikrotik_id = created_mikrotik.get('id')
+            if mikrotik_id:
+                self.created_servers.append(mikrotik_id)
+                self.log(f"   Created MikroTik server ID: {mikrotik_id}")
+        
+        # Test server filtering by group
+        success, filtered_servers = self.run_test(
+            "Filter Servers by Group",
+            "GET",
+            "api/servers",
+            200,
+            params={"group": "test"}
+        )
+        if success and isinstance(filtered_servers, list):
+            self.log(f"   Servers in 'test' group: {len(filtered_servers)}")
+        
+        # Test server filtering by tag
+        success, tagged_servers = self.run_test(
+            "Filter Servers by Tag",
+            "GET",
+            "api/servers",
+            200,
+            params={"tag": "web"}
+        )
+        if success and isinstance(tagged_servers, list):
+            self.log(f"   Servers with 'web' tag: {len(tagged_servers)}")
+        
+        # Test server search
+        success, search_results = self.run_test(
+            "Search Servers",
+            "GET",
+            "api/servers",
+            200,
+            params={"search": "test"}
+        )
+        if success and isinstance(search_results, list):
+            self.log(f"   Server search results: {len(search_results)}")
+        
+        # Test get server groups
+        success, groups = self.run_test(
+            "Get Server Groups",
+            "GET",
+            "api/servers/groups",
+            200
+        )
+        if success and isinstance(groups, list):
+            self.log(f"   Available groups: {len(groups)}")
+        
+        # Test get server tags
+        success, tags = self.run_test(
+            "Get Server Tags",
+            "GET",
+            "api/servers/tags",
+            200
+        )
+        if success and isinstance(tags, list):
+            self.log(f"   Available tags: {len(tags)}")
         
         # Test GET single server
         success, server = self.run_test(
@@ -125,6 +205,7 @@ class FleetAutomationAPITester:
         # Test UPDATE server
         updated_server = test_server.copy()
         updated_server["description"] = "Updated test server"
+        updated_server["tags"] = ["web", "nginx", "updated"]
         
         success, updated = self.run_test(
             "Update Server",
@@ -135,16 +216,6 @@ class FleetAutomationAPITester:
         )
         if not success:
             return False
-            
-        # Test GET servers (should have one more)
-        success, servers = self.run_test(
-            "Get Servers (After Create)",
-            "GET",
-            "api/servers",
-            200
-        )
-        if success and isinstance(servers, list):
-            self.log(f"   Server count after create: {len(servers)}")
             
         return True
 
