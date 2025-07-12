@@ -36,6 +36,14 @@ api_router = APIRouter(prefix="/api")
 # Thread pool for SSH operations
 ssh_executor = ThreadPoolExecutor(max_workers=10)
 
+# Initialize backup manager and security components
+backup_manager = NetworkBackupManager()
+tunnel_optimizer = TunnelOptimizer()
+
+# Initialize credential manager (in production, use proper key management)
+encryption_key = Fernet.generate_key()
+credential_manager = SecureCredentialManager(encryption_key)
+
 # Define Models
 class Server(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
