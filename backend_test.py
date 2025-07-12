@@ -473,6 +473,129 @@ class FleetAutomationAPITester:
         
         return True
 
+    def test_enhanced_backup_system(self):
+        """Test the enhanced Unimus-like backup system"""
+        self.log("🔧 Testing Enhanced Backup System (Unimus-like)")
+        
+        # Test enhanced backup statistics
+        success, enhanced_stats = self.run_test(
+            "Enhanced Backup Statistics",
+            "GET",
+            "api/enhanced-backups/statistics",
+            200,
+            params={"days": 30}
+        )
+        if success and isinstance(enhanced_stats, dict):
+            self.log(f"   Enhanced backup stats: Total={enhanced_stats.get('total_backups', 0)}, "
+                    f"Successful={enhanced_stats.get('successful_backups', 0)}, "
+                    f"Security Changes={enhanced_stats.get('security_changes_detected', 0)}")
+        
+        # Test enhanced backup list
+        success, enhanced_backups = self.run_test(
+            "Enhanced Backup List",
+            "GET",
+            "api/enhanced-backups/list",
+            200,
+            params={"limit": 10}
+        )
+        if success and isinstance(enhanced_backups, list):
+            self.log(f"   Enhanced backup history count: {len(enhanced_backups)}")
+        
+        # Test tunnel optimization - get supported tunnel types
+        success, tunnel_types = self.run_test(
+            "Get Tunnel Types",
+            "GET",
+            "api/enhanced-backups/tunnel-types",
+            200
+        )
+        if success and isinstance(tunnel_types, dict):
+            types_count = len(tunnel_types.get('tunnel_types', {}))
+            self.log(f"   Supported tunnel types: {types_count}")
+            if 'tunnel_types' in tunnel_types:
+                for tunnel_type, mtu in tunnel_types['tunnel_types'].items():
+                    self.log(f"     {tunnel_type}: MTU {mtu}")
+        
+        # Test tunnel optimization script generation
+        tunnel_config = {
+            "interface_name": "gre-tunnel1",
+            "tunnel_type": "gre",
+            "mtu_override": None
+        }
+        
+        success, optimization_script = self.run_test(
+            "Generate Tunnel Optimization Script",
+            "POST",
+            "api/enhanced-backups/tunnel-optimize",
+            200,
+            data=tunnel_config
+        )
+        if success and isinstance(optimization_script, dict):
+            self.log(f"   Generated script for {optimization_script.get('interface', 'unknown')} "
+                    f"({optimization_script.get('tunnel_type', 'unknown')})")
+            self.log(f"   Optimal MTU: {optimization_script.get('optimal_mtu', 'unknown')}")
+            self.log(f"   MSS Clamp: {optimization_script.get('mss_clamp', 'unknown')}")
+        
+        # Test WireGuard tunnel optimization
+        wireguard_config = {
+            "interface_name": "wg-tunnel1",
+            "tunnel_type": "wireguard"
+        }
+        
+        success, wg_script = self.run_test(
+            "Generate WireGuard Optimization Script",
+            "POST",
+            "api/enhanced-backups/tunnel-optimize",
+            200,
+            data=wireguard_config
+        )
+        if success and isinstance(wg_script, dict):
+            self.log(f"   WireGuard MTU: {wg_script.get('optimal_mtu', 'unknown')}")
+        
+        # Test security alerts
+        success, security_alerts = self.run_test(
+            "Get Security Alerts",
+            "GET",
+            "api/enhanced-backups/security-alerts",
+            200,
+            params={"limit": 10}
+        )
+        if success and isinstance(security_alerts, list):
+            self.log(f"   Security alerts count: {len(security_alerts)}")
+        
+        # Test security alerts filtering
+        success, critical_alerts = self.run_test(
+            "Get Critical Security Alerts",
+            "GET",
+            "api/enhanced-backups/security-alerts",
+            200,
+            params={"severity": "critical", "limit": 5}
+        )
+        if success and isinstance(critical_alerts, list):
+            self.log(f"   Critical alerts count: {len(critical_alerts)}")
+        
+        # Test enhanced backup creation (will fail for test server but should handle gracefully)
+        mikrotik_servers = [s for s in self.created_servers if "mikrotik" in str(s)]
+        if mikrotik_servers:
+            server_id = mikrotik_servers[0]
+            success, enhanced_backup = self.run_test(
+                "Create Enhanced Backup",
+                "POST",
+                f"api/enhanced-backups/create/{server_id}",
+                200
+            )
+            if success and isinstance(enhanced_backup, dict):
+                self.log(f"   Enhanced backup created: ID={enhanced_backup.get('id', 'unknown')}")
+                self.log(f"   Backup metadata: Size={enhanced_backup.get('size_bytes', 0)} bytes, "
+                        f"Changes={enhanced_backup.get('changes_count', 0)}, "
+                        f"Security Changes={enhanced_backup.get('security_changes', 0)}")
+                self.log(f"   MD5 Checksum: {enhanced_backup.get('md5_checksum', 'none')[:16]}...")
+                self.log(f"   Config Version: {enhanced_backup.get('config_version', 'unknown')}")
+                self.log(f"   Backup Duration: {enhanced_backup.get('backup_duration', 0):.2f}s")
+        else:
+            self.log("   No MikroTik servers available for enhanced backup test")
+        
+        return True
+
     def test_global_search(self):
         """Test global search functionality"""
         self.log("🔍 Testing Global Search")
