@@ -16,6 +16,8 @@ from concurrent.futures import ThreadPoolExecutor
 import yaml
 import json
 import re
+from backup_manager import NetworkBackupManager, TunnelOptimizer, SecureCredentialManager, BackupStatus
+from cryptography.fernet import Fernet
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
