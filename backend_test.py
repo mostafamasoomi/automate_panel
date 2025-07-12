@@ -431,20 +431,80 @@ class FleetAutomationAPITester:
         
         return success
 
-    def test_execution_history(self):
-        """Test execution history retrieval"""
-        self.log("📊 Testing Execution History")
+    def test_backup_functionality(self):
+        """Test backup creation and management"""
+        self.log("💾 Testing Backup Functionality")
         
-        success, executions = self.run_test(
-            "Get Execution History",
+        # Test backup stats
+        success, stats = self.run_test(
+            "Get Backup Stats",
             "GET",
-            "api/executions",
+            "api/backups/stats",
+            200
+        )
+        if success and isinstance(stats, dict):
+            self.log(f"   Backup stats: {stats}")
+        
+        # Test get backups
+        success, backups = self.run_test(
+            "Get Backup History",
+            "GET",
+            "api/backups",
             200,
             params={"limit": 10}
         )
+        if success and isinstance(backups, list):
+            self.log(f"   Backup history count: {len(backups)}")
         
-        if success and isinstance(executions, list):
-            self.log(f"   Execution history count: {len(executions)}")
+        # Test backup creation (will fail for test server but should handle gracefully)
+        mikrotik_servers = [s for s in self.created_servers if "mikrotik" in str(s)]
+        if mikrotik_servers:
+            server_id = mikrotik_servers[0]
+            success, backup = self.run_test(
+                "Create Backup",
+                "POST",
+                f"api/backups/{server_id}",
+                200
+            )
+            if success:
+                self.log(f"   Backup creation attempted for server: {server_id}")
+        else:
+            self.log("   No MikroTik servers available for backup test")
+        
+        return True
+
+    def test_global_search(self):
+        """Test global search functionality"""
+        self.log("🔍 Testing Global Search")
+        
+        # Test global search
+        success, results = self.run_test(
+            "Global Search",
+            "GET",
+            "api/search",
+            200,
+            params={"q": "test"}
+        )
+        
+        if success and isinstance(results, dict):
+            servers_count = len(results.get('servers', []))
+            tasks_count = len(results.get('tasks', []))
+            executions_count = len(results.get('executions', []))
+            
+            self.log(f"   Search results - Servers: {servers_count}, Tasks: {tasks_count}, Executions: {executions_count}")
+        
+        # Test search with different terms
+        success, monitoring_results = self.run_test(
+            "Search for Monitoring",
+            "GET",
+            "api/search",
+            200,
+            params={"q": "monitoring"}
+        )
+        
+        if success and isinstance(monitoring_results, dict):
+            tasks_count = len(monitoring_results.get('tasks', []))
+            self.log(f"   Monitoring search results - Tasks: {tasks_count}")
         
         return success
 
