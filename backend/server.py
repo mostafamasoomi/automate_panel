@@ -16,6 +16,10 @@ from concurrent.futures import ThreadPoolExecutor
 import yaml
 import json
 import re
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from backup_manager import NetworkBackupManager, TunnelOptimizer, SecureCredentialManager, BackupStatus
 from cryptography.fernet import Fernet
 
