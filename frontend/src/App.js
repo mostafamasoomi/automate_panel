@@ -9,9 +9,20 @@ const App = () => {
   const [servers, setServers] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [executions, setExecutions] = useState([]);
+  const [backups, setBackups] = useState([]);
+  const [backupStats, setBackupStats] = useState({ total: 0, successful: 0, failed: 0, running: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
+
+  // Filters
+  const [taskCategoryFilter, setTaskCategoryFilter] = useState('');
+  const [taskOsFilter, setTaskOsFilter] = useState('');
+  const [serverGroupFilter, setServerGroupFilter] = useState('');
+  const [categories, setCategories] = useState([]);
+  const [groups, setGroups] = useState([]);
 
   // Server form state
   const [serverForm, setServerForm] = useState({
@@ -22,6 +33,7 @@ const App = () => {
     port: 22,
     os_type: 'linux',
     groups: [],
+    tags: [],
     description: ''
   });
 
@@ -30,32 +42,57 @@ const App = () => {
     name: '',
     command: '',
     description: '',
-    os_type: 'linux'
+    category: 'custom',
+    os_type: 'linux',
+    parameters: [],
+    tags: []
   });
+
+  // Edit task state
+  const [editingTask, setEditingTask] = useState(null);
+  const [editTaskForm, setEditTaskForm] = useState({});
 
   // Execution state
   const [selectedServers, setSelectedServers] = useState([]);
   const [selectedTask, setSelectedTask] = useState('');
+  const [taskParameters, setTaskParameters] = useState({});
   const [quickCommand, setQuickCommand] = useState('');
   const [quickCommandServer, setQuickCommandServer] = useState('');
 
   useEffect(() => {
     fetchData();
+    initializeTemplates();
   }, []);
 
   const fetchData = async () => {
     try {
-      const [serversRes, tasksRes, executionsRes] = await Promise.all([
+      const [serversRes, tasksRes, executionsRes, backupsRes, backupStatsRes, categoriesRes, groupsRes] = await Promise.all([
         axios.get(`${API_BASE_URL}/api/servers`),
         axios.get(`${API_BASE_URL}/api/tasks`),
-        axios.get(`${API_BASE_URL}/api/executions?limit=50`)
+        axios.get(`${API_BASE_URL}/api/executions?limit=50`),
+        axios.get(`${API_BASE_URL}/api/backups?limit=50`),
+        axios.get(`${API_BASE_URL}/api/backups/stats`),
+        axios.get(`${API_BASE_URL}/api/tasks/categories`),
+        axios.get(`${API_BASE_URL}/api/servers/groups`)
       ]);
       
       setServers(serversRes.data);
       setTasks(tasksRes.data);
       setExecutions(executionsRes.data);
+      setBackups(backupsRes.data);
+      setBackupStats(backupStatsRes.data);
+      setCategories(categoriesRes.data);
+      setGroups(groupsRes.data);
     } catch (err) {
       setError('Failed to fetch data');
+    }
+  };
+
+  const initializeTemplates = async () => {
+    try {
+      await axios.post(`${API_BASE_URL}/api/initialize-templates`);
+    } catch (err) {
+      console.log('Templates initialization:', err.message);
     }
   };
 
@@ -73,11 +110,32 @@ const App = () => {
     }, 3000);
   };
 
+  // Global search
+  const handleGlobalSearch = async (query) => {
+    if (!query.trim()) {
+      setSearchResults(null);
+      return;
+    }
+
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/search?q=${encodeURIComponent(query)}`);
+      setSearchResults(response.data);
+    } catch (err) {
+      setError('Search failed');
+    }
+  };
+
+  // Server operations
   const handleServerSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await axios.post(`${API_BASE_URL}/api/servers`, serverForm);
+      const formData = {
+        ...serverForm,
+        groups: serverForm.groups.filter(g => g.trim()),
+        tags: serverForm.tags.filter(t => t.trim())
+      };
+      await axios.post(`${API_BASE_URL}/api/servers`, formData);
       showMessage('Server added successfully');
       setServerForm({
         name: '',
@@ -87,6 +145,7 @@ const App = () => {
         port: 22,
         os_type: 'linux',
         groups: [],
+        tags: [],
         description: ''
       });
       fetchData();
@@ -96,21 +155,55 @@ const App = () => {
     setLoading(false);
   };
 
+  // Task operations
   const handleTaskSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await axios.post(`${API_BASE_URL}/api/tasks`, taskForm);
+      const formData = {
+        ...taskForm,
+        tags: taskForm.tags.filter(t => t.trim())
+      };
+      await axios.post(`${API_BASE_URL}/api/tasks`, formData);
       showMessage('Task added successfully');
       setTaskForm({
         name: '',
         command: '',
         description: '',
-        os_type: 'linux'
+        category: 'custom',
+        os_type: 'linux',
+        parameters: [],
+        tags: []
       });
       fetchData();
     } catch (err) {
       showMessage('Failed to add task', 'error');
+    }
+    setLoading(false);
+  };
+
+  const handleEditTask = (task) => {
+    setEditingTask(task.id);
+    setEditTaskForm({
+      name: task.name,
+      command: task.command,
+      description: task.description || '',
+      category: task.category,
+      os_type: task.os_type,
+      tags: task.tags || []
+    });
+  };
+
+  const handleUpdateTask = async (taskId) => {
+    setLoading(true);
+    try {
+      await axios.put(`${API_BASE_URL}/api/tasks/${taskId}`, editTaskForm);
+      showMessage('Task updated successfully');
+      setEditingTask(null);
+      setEditTaskForm({});
+      fetchData();
+    } catch (err) {
+      showMessage('Failed to update task', 'error');
     }
     setLoading(false);
   };
@@ -147,10 +240,12 @@ const App = () => {
       const response = await axios.post(`${API_BASE_URL}/api/execute`, {
         server_ids: selectedServers,
         task_id: selectedTask,
-        timeout: 30
+        timeout: 30,
+        parameters: taskParameters
       });
       
       showMessage(`Task executed on ${response.data.length} servers`);
+      setTaskParameters({});
       fetchData();
     } catch (err) {
       showMessage('Failed to execute task', 'error');
@@ -178,6 +273,18 @@ const App = () => {
       setQuickCommand('');
     } catch (err) {
       showMessage('Failed to execute command', 'error');
+    }
+    setLoading(false);
+  };
+
+  const createBackup = async (serverId) => {
+    setLoading(true);
+    try {
+      await axios.post(`${API_BASE_URL}/api/backups/${serverId}`);
+      showMessage('Backup created successfully');
+      fetchData();
+    } catch (err) {
+      showMessage('Failed to create backup', 'error');
     }
     setLoading(false);
   };
@@ -210,18 +317,68 @@ const App = () => {
     setLoading(false);
   };
 
-  const TabButton = ({ tab, label, isActive }) => (
+  // Filter functions
+  const getFilteredTasks = () => {
+    return tasks.filter(task => {
+      const matchesSearch = !searchTerm || 
+        task.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        task.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        task.command.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      const matchesCategory = !taskCategoryFilter || task.category === taskCategoryFilter;
+      const matchesOs = !taskOsFilter || task.os_type === taskOsFilter;
+      
+      return matchesSearch && matchesCategory && matchesOs;
+    });
+  };
+
+  const getFilteredServers = () => {
+    return servers.filter(server => {
+      const matchesSearch = !searchTerm || 
+        server.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        server.hostname.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        server.description?.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      const matchesGroup = !serverGroupFilter || server.groups.includes(serverGroupFilter);
+      
+      return matchesSearch && matchesGroup;
+    });
+  };
+
+  // Get task for execution to show parameters
+  const getSelectedTaskObj = () => {
+    return tasks.find(t => t.id === selectedTask);
+  };
+
+  const TabButton = ({ tab, label, isActive, badge }) => (
     <button
       onClick={() => setActiveTab(tab)}
-      className={`px-6 py-3 font-medium rounded-lg transition-all ${
+      className={`px-6 py-3 font-medium rounded-lg transition-all relative ${
         isActive
           ? 'bg-blue-600 text-white shadow-lg'
           : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
       }`}
     >
       {label}
+      {badge && (
+        <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-6 w-6 flex items-center justify-center">
+          {badge}
+        </span>
+      )}
     </button>
   );
+
+  const formatTimestamp = (timestamp) => {
+    return new Date(timestamp).toLocaleString();
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -232,11 +389,27 @@ const App = () => {
             <div className="flex items-center">
               <div className="flex-shrink-0">
                 <h1 className="text-2xl font-bold text-gray-900">
-                  🚀 Fleet Automation
+                  🚀 Fleet Automation Pro
                 </h1>
               </div>
             </div>
             <div className="flex items-center space-x-4">
+              {/* Global Search */}
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Global search..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    handleGlobalSearch(e.target.value);
+                  }}
+                  className="w-64 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <div className="absolute right-3 top-2.5">
+                  🔍
+                </div>
+              </div>
               <div className="flex items-center space-x-2">
                 <span className="text-sm text-gray-600">
                   {servers.length} Servers
@@ -244,6 +417,10 @@ const App = () => {
                 <span className="text-sm text-gray-600">•</span>
                 <span className="text-sm text-gray-600">
                   {tasks.length} Tasks
+                </span>
+                <span className="text-sm text-gray-600">•</span>
+                <span className="text-sm text-gray-600">
+                  {backupStats.total} Backups
                 </span>
               </div>
             </div>
@@ -259,10 +436,52 @@ const App = () => {
             <TabButton tab="tasks" label="Tasks" isActive={activeTab === 'tasks'} />
             <TabButton tab="execute" label="Execute" isActive={activeTab === 'execute'} />
             <TabButton tab="quick" label="Quick Command" isActive={activeTab === 'quick'} />
+            <TabButton tab="backups" label="Backups" isActive={activeTab === 'backups'} badge={backupStats.failed > 0 ? backupStats.failed : null} />
             <TabButton tab="history" label="History" isActive={activeTab === 'history'} />
           </div>
         </div>
       </nav>
+
+      {/* Global Search Results */}
+      {searchResults && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="bg-white rounded-lg shadow p-4">
+            <h3 className="text-lg font-semibold mb-3">Search Results for "{searchTerm}"</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {searchResults.servers.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2">Servers ({searchResults.servers.length})</h4>
+                  {searchResults.servers.map(server => (
+                    <div key={server.id} className="text-sm text-gray-600 mb-1">
+                      {server.name} ({server.hostname})
+                    </div>
+                  ))}
+                </div>
+              )}
+              {searchResults.tasks.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2">Tasks ({searchResults.tasks.length})</h4>
+                  {searchResults.tasks.map(task => (
+                    <div key={task.id} className="text-sm text-gray-600 mb-1">
+                      {task.name} ({task.category})
+                    </div>
+                  ))}
+                </div>
+              )}
+              {searchResults.executions.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2">Executions ({searchResults.executions.length})</h4>
+                  {searchResults.executions.map(execution => (
+                    <div key={execution.id} className="text-sm text-gray-600 mb-1">
+                      {execution.command.substring(0, 50)}...
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       {(error || success) && (
@@ -289,7 +508,7 @@ const App = () => {
               <form onSubmit={handleServerSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Server Name
+                    Server Name *
                   </label>
                   <input
                     type="text"
@@ -301,7 +520,7 @@ const App = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Hostname/IP
+                    Hostname/IP *
                   </label>
                   <input
                     type="text"
@@ -313,7 +532,7 @@ const App = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Username
+                    Username *
                   </label>
                   <input
                     type="text"
@@ -358,6 +577,30 @@ const App = () => {
                     <option value="mikrotik">MikroTik</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Groups (comma separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={serverForm.groups.join(', ')}
+                    onChange={(e) => setServerForm({...serverForm, groups: e.target.value.split(',').map(g => g.trim())})}
+                    placeholder="production, web, database"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tags (comma separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={serverForm.tags.join(', ')}
+                    onChange={(e) => setServerForm({...serverForm, tags: e.target.value.split(',').map(t => t.trim())})}
+                    placeholder="nginx, mysql, monitoring"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Description
@@ -381,9 +624,28 @@ const App = () => {
               </form>
             </div>
 
+            {/* Server Filters */}
+            <div className="bg-white rounded-lg shadow p-4">
+              <div className="flex flex-wrap gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Group</label>
+                  <select
+                    value={serverGroupFilter}
+                    onChange={(e) => setServerGroupFilter(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                  >
+                    <option value="">All Groups</option>
+                    {groups.map(group => (
+                      <option key={group} value={group}>{group}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div className="bg-white rounded-lg shadow">
               <div className="p-6">
-                <h2 className="text-xl font-semibold mb-4">Servers ({servers.length})</h2>
+                <h2 className="text-xl font-semibold mb-4">Servers ({getFilteredServers().length})</h2>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
@@ -398,7 +660,7 @@ const App = () => {
                           OS Type
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Status
+                          Groups/Tags
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Actions
@@ -406,7 +668,7 @@ const App = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {servers.map((server) => (
+                      {getFilteredServers().map((server) => (
                         <tr key={server.id}>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm font-medium text-gray-900">{server.name}</div>
@@ -424,12 +686,18 @@ const App = () => {
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                              server.status === 'online' ? 'bg-green-100 text-green-800' : 
-                              server.status === 'offline' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {server.status}
-                            </span>
+                            <div className="flex flex-wrap gap-1">
+                              {server.groups?.map(group => (
+                                <span key={group} className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                                  {group}
+                                </span>
+                              ))}
+                              {server.tags?.map(tag => (
+                                <span key={tag} className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                  #{tag}
+                                </span>
+                              ))}
+                            </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <button
@@ -439,6 +707,15 @@ const App = () => {
                             >
                               Test
                             </button>
+                            {server.os_type === 'mikrotik' && (
+                              <button
+                                onClick={() => createBackup(server.id)}
+                                disabled={loading}
+                                className="text-green-600 hover:text-green-900 mr-3"
+                              >
+                                Backup
+                              </button>
+                            )}
                             <button
                               onClick={() => deleteServer(server.id)}
                               disabled={loading}
@@ -465,7 +742,7 @@ const App = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Task Name
+                      Task Name *
                     </label>
                     <input
                       type="text"
@@ -474,6 +751,30 @@ const App = () => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                       required
                     />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Category
+                    </label>
+                    <select
+                      value={taskForm.category}
+                      onChange={(e) => setTaskForm({...taskForm, category: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="custom">Custom</option>
+                      <option value="monitoring">Monitoring</option>
+                      <option value="updates">Updates</option>
+                      <option value="security">Security</option>
+                      <option value="backup">Backup</option>
+                      <option value="networking">Networking</option>
+                      <option value="services">Services</option>
+                      <option value="docker">Docker</option>
+                      <option value="web">Web</option>
+                      <option value="database">Database</option>
+                      <option value="performance">Performance</option>
+                      <option value="logging">Logging</option>
+                      <option value="maintenance">Maintenance</option>
+                    </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -488,16 +789,29 @@ const App = () => {
                       <option value="mikrotik">MikroTik</option>
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Tags (comma separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={taskForm.tags.join(', ')}
+                      onChange={(e) => setTaskForm({...taskForm, tags: e.target.value.split(',').map(t => t.trim())})}
+                      placeholder="nginx, backup, monitoring"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Command
+                    Command *
                   </label>
                   <textarea
                     value={taskForm.command}
                     onChange={(e) => setTaskForm({...taskForm, command: e.target.value})}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     rows="3"
+                    placeholder="echo 'Hello World'"
                     required
                   />
                 </div>
@@ -510,6 +824,7 @@ const App = () => {
                     onChange={(e) => setTaskForm({...taskForm, description: e.target.value})}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     rows="2"
+                    placeholder="Describe what this task does..."
                   />
                 </div>
                 <button
@@ -522,37 +837,148 @@ const App = () => {
               </form>
             </div>
 
+            {/* Task Filters */}
+            <div className="bg-white rounded-lg shadow p-4">
+              <div className="flex flex-wrap gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Category</label>
+                  <select
+                    value={taskCategoryFilter}
+                    onChange={(e) => setTaskCategoryFilter(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                  >
+                    <option value="">All Categories</option>
+                    {categories.map(category => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Filter by OS</label>
+                  <select
+                    value={taskOsFilter}
+                    onChange={(e) => setTaskOsFilter(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                  >
+                    <option value="">All OS Types</option>
+                    <option value="linux">Linux</option>
+                    <option value="mikrotik">MikroTik</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div className="bg-white rounded-lg shadow">
               <div className="p-6">
-                <h2 className="text-xl font-semibold mb-4">Tasks ({tasks.length})</h2>
+                <h2 className="text-xl font-semibold mb-4">Tasks ({getFilteredTasks().length})</h2>
                 <div className="space-y-4">
-                  {tasks.map((task) => (
+                  {getFilteredTasks().map((task) => (
                     <div key={task.id} className="border rounded-lg p-4">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-2">
-                            <h3 className="text-lg font-medium">{task.name}</h3>
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                              task.os_type === 'linux' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                            }`}>
-                              {task.os_type}
-                            </span>
+                      {editingTask === task.id ? (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <input
+                              type="text"
+                              value={editTaskForm.name}
+                              onChange={(e) => setEditTaskForm({...editTaskForm, name: e.target.value})}
+                              className="px-3 py-2 border border-gray-300 rounded-md"
+                              placeholder="Task name"
+                            />
+                            <select
+                              value={editTaskForm.category}
+                              onChange={(e) => setEditTaskForm({...editTaskForm, category: e.target.value})}
+                              className="px-3 py-2 border border-gray-300 rounded-md"
+                            >
+                              <option value="custom">Custom</option>
+                              <option value="monitoring">Monitoring</option>
+                              <option value="updates">Updates</option>
+                              <option value="security">Security</option>
+                              <option value="backup">Backup</option>
+                              <option value="networking">Networking</option>
+                            </select>
                           </div>
-                          {task.description && (
-                            <p className="text-sm text-gray-600 mt-1">{task.description}</p>
-                          )}
-                          <div className="mt-2 bg-gray-100 rounded p-2">
-                            <code className="text-sm">{task.command}</code>
+                          <textarea
+                            value={editTaskForm.command}
+                            onChange={(e) => setEditTaskForm({...editTaskForm, command: e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                            rows="3"
+                          />
+                          <textarea
+                            value={editTaskForm.description}
+                            onChange={(e) => setEditTaskForm({...editTaskForm, description: e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                            rows="2"
+                            placeholder="Description"
+                          />
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => handleUpdateTask(task.id)}
+                              disabled={loading}
+                              className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setEditingTask(null)}
+                              className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700"
+                            >
+                              Cancel
+                            </button>
                           </div>
                         </div>
-                        <button
-                          onClick={() => deleteTask(task.id)}
-                          disabled={loading}
-                          className="text-red-600 hover:text-red-900 ml-4"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      ) : (
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <h3 className="text-lg font-medium">{task.name}</h3>
+                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                task.os_type === 'linux' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                              }`}>
+                                {task.os_type}
+                              </span>
+                              <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                                {task.category}
+                              </span>
+                              {task.is_template && (
+                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                  Template
+                                </span>
+                              )}
+                            </div>
+                            {task.description && (
+                              <p className="text-sm text-gray-600 mb-2">{task.description}</p>
+                            )}
+                            {task.tags && task.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mb-2">
+                                {task.tags.map(tag => (
+                                  <span key={tag} className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
+                                    #{tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <div className="mt-2 bg-gray-100 rounded p-2">
+                              <code className="text-sm">{task.command}</code>
+                            </div>
+                          </div>
+                          <div className="flex space-x-2 ml-4">
+                            <button
+                              onClick={() => handleEditTask(task)}
+                              disabled={loading}
+                              className="text-blue-600 hover:text-blue-900"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => deleteTask(task.id)}
+                              disabled={loading}
+                              className="text-red-600 hover:text-red-900"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -572,17 +998,60 @@ const App = () => {
                   </label>
                   <select
                     value={selectedTask}
-                    onChange={(e) => setSelectedTask(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedTask(e.target.value);
+                      setTaskParameters({});
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select a task...</option>
                     {tasks.map((task) => (
                       <option key={task.id} value={task.id}>
-                        {task.name} ({task.os_type})
+                        {task.name} ({task.os_type} - {task.category})
                       </option>
                     ))}
                   </select>
                 </div>
+
+                {/* Task Parameters */}
+                {getSelectedTaskObj()?.parameters?.length > 0 && (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <h3 className="text-sm font-medium text-gray-700 mb-3">Task Parameters</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {getSelectedTaskObj().parameters.map((param) => (
+                        <div key={param.name}>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            {param.name} {param.required && '*'}
+                          </label>
+                          {param.type === 'select' ? (
+                            <select
+                              value={taskParameters[param.name] || ''}
+                              onChange={(e) => setTaskParameters({...taskParameters, [param.name]: e.target.value})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                              required={param.required}
+                            >
+                              <option value="">Select {param.name}</option>
+                              {param.options.map(option => (
+                                <option key={option} value={option}>{option}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type={param.type === 'number' ? 'number' : 'text'}
+                              value={taskParameters[param.name] || ''}
+                              onChange={(e) => setTaskParameters({...taskParameters, [param.name]: e.target.value})}
+                              placeholder={param.description}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                              required={param.required}
+                            />
+                          )}
+                          <p className="text-xs text-gray-500 mt-1">{param.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Select Servers
@@ -603,8 +1072,12 @@ const App = () => {
                           }}
                           className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
-                        <label htmlFor={`server-${server.id}`} className="text-sm">
-                          {server.name} ({server.hostname})
+                        <label htmlFor={`server-${server.id}`} className="text-sm flex-1">
+                          <span className="font-medium">{server.name}</span>
+                          <span className="text-gray-500"> ({server.hostname} - {server.os_type})</span>
+                          {server.groups.length > 0 && (
+                            <span className="text-purple-600"> [{server.groups.join(', ')}]</span>
+                          )}
                         </label>
                       </div>
                     ))}
@@ -639,7 +1112,7 @@ const App = () => {
                     <option value="">Select a server...</option>
                     {servers.map((server) => (
                       <option key={server.id} value={server.id}>
-                        {server.name} ({server.hostname})
+                        {server.name} ({server.hostname} - {server.os_type})
                       </option>
                     ))}
                   </select>
@@ -668,19 +1141,193 @@ const App = () => {
           </div>
         )}
 
+        {activeTab === 'backups' && (
+          <div className="space-y-8">
+            {/* Backup Statistics */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                      📊
+                    </div>
+                  </div>
+                  <div className="ml-4">
+                    <div className="text-sm font-medium text-gray-500">Total Backups</div>
+                    <div className="text-2xl font-bold text-gray-900">{backupStats.total}</div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                      ✅
+                    </div>
+                  </div>
+                  <div className="ml-4">
+                    <div className="text-sm font-medium text-gray-500">Successful</div>
+                    <div className="text-2xl font-bold text-green-600">{backupStats.successful}</div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                      ❌
+                    </div>
+                  </div>
+                  <div className="ml-4">
+                    <div className="text-sm font-medium text-gray-500">Failed</div>
+                    <div className="text-2xl font-bold text-red-600">{backupStats.failed}</div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
+                      ⏳
+                    </div>
+                  </div>
+                  <div className="ml-4">
+                    <div className="text-sm font-medium text-gray-500">Running</div>
+                    <div className="text-2xl font-bold text-yellow-600">{backupStats.running}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Backup Actions */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-xl font-semibold mb-4">Create Backup</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {servers.filter(s => s.os_type === 'mikrotik').map(server => (
+                  <div key={server.id} className="border rounded-lg p-4">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h3 className="font-medium">{server.name}</h3>
+                        <p className="text-sm text-gray-500">{server.hostname}</p>
+                      </div>
+                      <button
+                        onClick={() => createBackup(server.id)}
+                        disabled={loading}
+                        className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:opacity-50"
+                      >
+                        Backup
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Backup History */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="p-6">
+                <h2 className="text-xl font-semibold mb-4">Backup History</h2>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Server
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Timestamp
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Size
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Type
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {backups.map((backup) => (
+                        <tr key={backup.id}>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {servers.find(s => s.id === backup.server_id)?.name || 'Unknown'}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">{formatTimestamp(backup.timestamp)}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                              backup.status === 'success' ? 'bg-green-100 text-green-800' : 
+                              backup.status === 'failed' ? 'bg-red-100 text-red-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {backup.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">{formatFileSize(backup.size_bytes)}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">{backup.backup_type}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            {backup.status === 'success' && backup.content && (
+                              <button
+                                onClick={() => {
+                                  const blob = new Blob([backup.content], { type: 'text/plain' });
+                                  const url = window.URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = `backup_${backup.server_id}_${backup.timestamp}.txt`;
+                                  a.click();
+                                  window.URL.revokeObjectURL(url);
+                                }}
+                                className="text-blue-600 hover:text-blue-900"
+                              >
+                                Download
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'history' && (
           <div className="bg-white rounded-lg shadow">
             <div className="p-6">
               <h2 className="text-xl font-semibold mb-4">Execution History</h2>
               <div className="space-y-4">
                 {executions.map((execution) => (
-                  <div key={execution.id} className="border rounded-lg p-4">
+                  <div key={execution.id} className={`border rounded-lg p-4 ${
+                    execution.status === 'success' ? 'execution-success' : 'execution-error'
+                  }`}>
                     <div className="flex justify-between items-start mb-2">
                       <div>
                         <h3 className="font-medium">{execution.command}</h3>
                         <p className="text-sm text-gray-600">
                           Server: {servers.find(s => s.id === execution.server_id)?.name || 'Unknown'}
                         </p>
+                        {execution.parameters && Object.keys(execution.parameters).length > 0 && (
+                          <p className="text-sm text-gray-600">
+                            Parameters: {JSON.stringify(execution.parameters)}
+                          </p>
+                        )}
                       </div>
                       <div className="text-right">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -689,7 +1336,7 @@ const App = () => {
                           {execution.status}
                         </span>
                         <p className="text-xs text-gray-500 mt-1">
-                          {new Date(execution.completed_at).toLocaleString()}
+                          {formatTimestamp(execution.completed_at)}
                         </p>
                       </div>
                     </div>
