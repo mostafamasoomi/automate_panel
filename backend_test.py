@@ -701,6 +701,7 @@ class FleetAutomationAPITester:
             ("Quick Execute", self.test_quick_execute),
             ("Task Execution", self.test_task_execution),
             ("Backup Functionality", self.test_backup_functionality),
+            ("Enhanced Backup System", self.test_enhanced_backup_system),
             ("Global Search", self.test_global_search),
             ("Error Handling", self.test_error_handling)
         ]
