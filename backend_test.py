@@ -571,12 +571,14 @@ class FleetAutomationAPITester:
         # Run all test suites
         test_suites = [
             ("API Root", self.test_api_root),
-            ("Server CRUD", self.test_server_crud),
-            ("Task CRUD", self.test_task_crud),
+            ("Template Initialization", self.test_template_initialization),
+            ("Enhanced Server CRUD", self.test_server_crud),
+            ("Enhanced Task CRUD", self.test_task_crud),
             ("Connection Testing", self.test_connection_testing),
             ("Quick Execute", self.test_quick_execute),
             ("Task Execution", self.test_task_execution),
-            ("Execution History", self.test_execution_history),
+            ("Backup Functionality", self.test_backup_functionality),
+            ("Global Search", self.test_global_search),
             ("Error Handling", self.test_error_handling)
         ]
         
