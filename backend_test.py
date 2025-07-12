@@ -148,13 +148,29 @@ class FleetAutomationAPITester:
             
         return True
 
-    def test_task_crud(self):
-        """Test complete task CRUD operations"""
-        self.log("📋 Testing Task CRUD Operations")
+    def test_template_initialization(self):
+        """Test template initialization endpoint"""
+        self.log("🎯 Testing Template Initialization")
         
-        # Test GET tasks (empty initially)
+        success, response = self.run_test(
+            "Initialize Templates",
+            "POST",
+            "api/initialize-templates",
+            200
+        )
+        
+        if success and isinstance(response, dict):
+            self.log(f"   Template initialization: {response.get('message', 'Unknown')}")
+        
+        return success
+
+    def test_task_crud(self):
+        """Test complete task CRUD operations including enhanced features"""
+        self.log("📋 Testing Enhanced Task CRUD Operations")
+        
+        # Test GET tasks (should have templates now)
         success, tasks = self.run_test(
-            "Get Tasks (Initial)",
+            "Get Tasks (With Templates)",
             "GET",
             "api/tasks",
             200
@@ -163,19 +179,64 @@ class FleetAutomationAPITester:
             return False
             
         initial_count = len(tasks) if isinstance(tasks, list) else 0
-        self.log(f"   Initial task count: {initial_count}")
+        self.log(f"   Task count with templates: {initial_count}")
         
-        # Test CREATE task
+        # Test task filtering by category
+        success, filtered_tasks = self.run_test(
+            "Filter Tasks by Category",
+            "GET",
+            "api/tasks",
+            200,
+            params={"category": "monitoring"}
+        )
+        if success and isinstance(filtered_tasks, list):
+            self.log(f"   Monitoring tasks count: {len(filtered_tasks)}")
+        
+        # Test task filtering by OS type
+        success, linux_tasks = self.run_test(
+            "Filter Tasks by OS Type",
+            "GET",
+            "api/tasks",
+            200,
+            params={"os_type": "linux"}
+        )
+        if success and isinstance(linux_tasks, list):
+            self.log(f"   Linux tasks count: {len(linux_tasks)}")
+        
+        # Test task search
+        success, search_results = self.run_test(
+            "Search Tasks",
+            "GET",
+            "api/tasks",
+            200,
+            params={"search": "system"}
+        )
+        if success and isinstance(search_results, list):
+            self.log(f"   Search results count: {len(search_results)}")
+        
+        # Test get task categories
+        success, categories = self.run_test(
+            "Get Task Categories",
+            "GET",
+            "api/tasks/categories",
+            200
+        )
+        if success and isinstance(categories, list):
+            self.log(f"   Available categories: {len(categories)}")
+        
+        # Test CREATE task with enhanced features
         test_task = {
             "name": f"test-task-{int(time.time())}",
             "command": "echo 'Hello from test task'",
             "description": "Test task for API testing",
+            "category": "custom",
             "os_type": "linux",
+            "tags": ["test", "api"],
             "variables": {"test_var": "test_value"}
         }
         
         success, created_task = self.run_test(
-            "Create Task",
+            "Create Enhanced Task",
             "POST",
             "api/tasks",
             200,
@@ -189,6 +250,23 @@ class FleetAutomationAPITester:
             self.created_tasks.append(task_id)
             self.log(f"   Created task ID: {task_id}")
         
+        # Test task UPDATE (editing)
+        update_data = {
+            "name": "Updated Test Task",
+            "description": "Updated description",
+            "category": "monitoring"
+        }
+        
+        success, updated_task = self.run_test(
+            "Update Task (Edit)",
+            "PUT",
+            f"api/tasks/{task_id}",
+            200,
+            data=update_data
+        )
+        if not success:
+            return False
+        
         # Test GET single task
         success, task = self.run_test(
             "Get Single Task",
@@ -198,16 +276,6 @@ class FleetAutomationAPITester:
         )
         if not success:
             return False
-            
-        # Test GET tasks (should have one more)
-        success, tasks = self.run_test(
-            "Get Tasks (After Create)",
-            "GET",
-            "api/tasks",
-            200
-        )
-        if success and isinstance(tasks, list):
-            self.log(f"   Task count after create: {len(tasks)}")
             
         return True
 
